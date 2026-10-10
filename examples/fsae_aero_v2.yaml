@@ -1,0 +1,95 @@
+# fsae-susp design file - "FSAE aero redesign v2 3D checked"
+#
+# Units: mm and degrees. Front-view fields use VSusp's conventions so a design
+# round-trips with vsusp.com (fsae-susp link / import-vsusp):
+#   * chassis pivots: [x from frame centre, y above frame bottom]
+#   * knuckle points: measured from the HUB FACE, [inboard, up] for the upper
+#     ball joint and [inboard, down] for the lower ball joint and tie rod
+#   * wheel.offset: hub face is this far OUTBOARD of the wheel centreline
+# 3D fields use x forward (front axle = 0), y left, z up.
+
+name: FSAE aero redesign v2 3D checked
+
+vehicle:
+  wheelbase: 1550.0
+  cg_height: 280.0
+  front_brake_bias: 0.65     # fraction of braking on the front axle (outboard brakes)
+  inboard_drive: true        # diff on the chassis: anti-squat uses the wheel-centre force
+
+tyre:                         # Hoosier 16.0x7.5-10 (16.2 in measured OD, 8.4 in section on 8 in rim)
+  diameter: 411.48
+  width: 213.36
+  static_deflection: 5.0     # loaded radius = diameter/2 - static_deflection
+
+wheel:
+  rim_diameter: 254.0
+  offset: 25.4
+  # clearance check only (approximate 10x8 in rim; measure yours):
+  lip_inboard: 107.0         # inboard rim lip, mm inboard of the wheel centreline
+  lip_radius: 122.0          # inner radius of the rim at the lip
+  link_radius: 8.0           # tube / tie-rod radius
+  node_inboard_of_lip: 35.0  # A-arm legs meet this far inboard of the lip; one stem enters the wheel
+
+front:
+  ride_height: 60.0
+  lower_pivot: [185.0, 26.0]
+  upper_pivot: [275.0, 159.5]
+  lower_arm: 373.5
+  upper_arm: 267.3
+  knuckle:
+    upper_ball_joint: [47.0, 92.0]
+    lower_ball_joint: [27.0, 88.0]
+    tie_rod: [47.98, 19.35]
+  three_d:
+    caster: 5.0
+    kingpin_offset_x: 0.0          # kingpin x-offset from wheel centre at hub height (+ ahead)
+    anti: 20.0                     # % anti-dive; tilts both pivot axes in parallel
+    # pivot_axis_slope: -0.0556    # (alternative) explicit dz/dx of the pivot axes
+    lower_pivot_x: [150.0, -150.0] # front / rear pivot, relative to the ball joint x
+    upper_pivot_x: [120.0, -120.0]
+    tie_rod:
+      x: -48.25                    # outer tie rod x relative to the axle (- = behind)
+      inner: auto                  # auto = zero bump steer in 3D, or {x: .., y: .., z: ..}
+      # design: {side: rear, arm_length: 50, arm_angle: 15, below_hub: 20}   # derive the OTR instead
+    steering:
+      lock_inside: 27.0            # inside-wheel lock to check (9 m hairpin needs ~27 deg)
+      ackermann_at: 25.0           # inside angle at which Ackermann % is reported
+
+rear:
+  ride_height: 60.0
+  lower_pivot: [155.0, 27.5]
+  upper_pivot: [255.0, 163.0]
+  lower_arm: 382.9
+  upper_arm: 269.7
+  knuckle:
+    upper_ball_joint: [40.0, 87.0]
+    lower_ball_joint: [25.0, 103.2]
+    tie_rod: [30.0, 30.0]          # toe link
+  three_d:
+    caster: 0.0
+    anti: 25.0                     # % anti-squat (anti-lift follows from brake bias)
+    lower_pivot_x: [150.0, -150.0]
+    upper_pivot_x: [120.0, -120.0]
+    tie_rod:
+      x: -70.0                     # toe link 70 mm behind the axle
+      inner: auto
+
+optimise:
+  camber:                          # static camber is chosen so the outside wheel averages this
+    outside_target: -1.5
+    low_speed: [1.5, 0.0]          # [body roll deg, heave mm]
+    high_speed: [1.8, 10.0]
+  front:
+    targets: {rc_height: 30.0, fvsa_range: [900, 1300], lca_incl_range: [-3, 4]}
+    bounds:                        # VSusp coordinates; lo == hi fixes a coordinate
+      lower_x: [185, 215]
+      lower_y: [5, 60]
+      upper_x: [240, 285]
+      upper_y: [130, 240]
+  rear:
+    targets: {rc_height: 45.0, fvsa_range: [900, 1300]}
+    bounds:
+      lower_x: [155, 185]
+      lower_y: [5, 70]
+      upper_x: [215, 275]
+      upper_y: [130, 250]

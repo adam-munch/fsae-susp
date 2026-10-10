@@ -1,0 +1,51 @@
+# fsae-susp design file (imported from VSusp). 3D/vehicle values are defaults - edit them.
+name: Final structure susp
+vehicle: {wheelbase: 1550.0, cg_height: 280.0, front_brake_bias: 0.65, inboard_drive: true}
+tyre: {diameter: 406.4, width: 152.38, static_deflection: 0.0}
+wheel: {rim_diameter: 254.0, offset: 25.4, lip_inboard: 107.0, lip_radius: 122.0, link_radius: 8.0, node_inboard_of_lip: 35.0}
+front:
+  ride_height: 60.0
+  lower_pivot: [208.25, 45.0]
+  upper_pivot: [260.0, 175.0]
+  lower_arm: 336.9
+  upper_arm: 265.89
+  knuckle:
+    upper_ball_joint: [59.0, 92.0]
+    lower_ball_joint: [39.0, 83.0]
+    tie_rod: [64.0, 58.0]
+  three_d:
+    caster: 5.0
+    kingpin_offset_x: 0.0
+    anti: 20.0
+    lower_pivot_x: [150.0, -150.0]
+    upper_pivot_x: [120.0, -120.0]
+    tie_rod: {x: -60.0, inner: auto}
+    steering: {lock_inside: 27.0, ackermann_at: 25.0}
+rear:
+  ride_height: 60.0
+  lower_pivot: [175.0, 36.0]
+  upper_pivot: [235.0, 174.0]
+  lower_arm: 365.0
+  upper_arm: 294.0
+  knuckle:
+    upper_ball_joint: [40.0, 87.0]
+    lower_ball_joint: [25.0, 103.2]
+    tie_rod: [30.0, 30.0]
+  three_d:
+    caster: 0.0
+    kingpin_offset_x: 0.0
+    anti: 25.0
+    lower_pivot_x: [150.0, -150.0]
+    upper_pivot_x: [120.0, -120.0]
+    tie_rod: {x: -70.0, inner: auto}
+optimise:
+  camber:
+    outside_target: -1.5
+    low_speed: [1.5, 0.0]
+    high_speed: [1.8, 10.0]
+  front:
+    targets: {}
+    bounds: {}
+  rear:
+    targets: {}
+    bounds: {}
