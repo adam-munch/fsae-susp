@@ -55,6 +55,25 @@ def front_view_rows(res2d):
     return rows
 
 
+def compare_rows(results, labels):
+    """Front-view metrics of several designs side by side. With two designs a last column holds B - A.
+    Returns (rows, headers)."""
+    per = [front_view_rows(r) for r in results]
+    headers = ["Front view"] + list(labels) + (["Change"] if len(labels) == 2 else [])
+    rows = []
+    for col, axle in ((1, "Front"), (2, "Rear")):
+        for i, row in enumerate(per[0]):
+            vals = [p[i][col] for p in per]
+            r = [f"{axle}: {row[0]}"] + vals
+            if len(vals) == 2:
+                try:
+                    r.append(f"{float(vals[1]) - float(vals[0]):+.4g}")
+                except ValueError:                  # "a / b" pairs
+                    r.append("" if vals[0] == vals[1] else "changed")
+            rows.append(r)
+    return rows, headers
+
+
 def three_d_rows(res3d):
     rows = []
     for lab, fn in (("Caster (deg)", lambda a: f"{_z(res3d[a]['static']['caster'], 2):.2f}"),

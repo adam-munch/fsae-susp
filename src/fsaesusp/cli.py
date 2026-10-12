@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 
 from . import __version__
 from . import config as cfgmod
 from . import api, plots, report
+from .paths import default_design_path
 
 
 def _out(path):
@@ -19,9 +21,11 @@ def cmd_import(a):
     if not link.lstrip().startswith(("http", "0.")) and Path(link).exists():
         link = Path(link).read_text(encoding="utf-8").strip()      # link saved in a text file
     cfg = cfgmod.from_vsusp(link)
-    cfgmod.save(cfg, a.output, header="fsae-susp design file (imported from VSusp). 3D/vehicle values are defaults - edit them.")
-    print(f"Wrote {a.output}  (project '{cfg['name']}')")
-    print("Next: fsae-susp analyze", a.output)
+    out = Path(a.output) if a.output else default_design_path(cfg["name"])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cfgmod.save(cfg, out, header="fsae-susp design file (imported from VSusp). 3D/vehicle values are defaults - edit them.")
+    print(f"Wrote {out}  (project '{cfg['name']}')")
+    print("Next: fsae-susp analyze", out)
 
 
 def cmd_link(a):
@@ -47,6 +51,26 @@ def cmd_analyze(a):
         plots.front_view(designs, out / "front_view.png", title=f"Front-view kinematics - {cfg.get('name', '')}")
         report.write_markdown(out / "report_front_view.md", cfg, res, None, [out / "front_view.png"])
         print(f"\nWrote {out / 'front_view.png'} and {out / 'report_front_view.md'}")
+
+
+def cmd_compare(a):
+    if not 2 <= len(a.designs) <= 4:
+        raise ValueError("compare takes 2 to 4 design files")
+    cfgs = [cfgmod.load(d) for d in a.designs]
+    labels = [Path(d).stem for d in a.designs]
+    rows, headers = report.compare_rows([api.analyze(c) for c in cfgs], labels)
+    print(); print(report.table(rows, headers))
+    if a.output:
+        out = _out(a.output)
+        plots.front_view([(lab, {ax: cfgmod.axle_fv(c, ax) for ax in api.AXLES}) for lab, c in zip(labels, cfgs)],
+                         out / "front_view.png", title="Front-view comparison: " + " vs ".join(labels))
+        with open(out / "comparison.csv", "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerows([headers] + rows)
+        names = "\n".join(f"* **{lab}**: {c.get('name', '')} (`{d}`)" for lab, c, d in zip(labels, cfgs, a.designs))
+        (out / "comparison.md").write_text(f"# Comparison: {' vs '.join(labels)}\n\n{names}\n\n"
+                                           + report.md_table(rows, headers) + "\n\n![Front view](front_view.png)\n",
+                                           encoding="utf-8")
+        print(f"\nWrote {out / 'front_view.png'}, comparison.csv and comparison.md")
 
 
 def cmd_optimize(a):
@@ -125,7 +149,8 @@ def main(argv=None):
 
     s = sub.add_parser("import-vsusp", help="create a design file from a VSusp link")
     s.add_argument("link", help="the VSusp link in quotes, or a text file containing it")
-    s.add_argument("-o", "--output", default="design.yaml"); s.set_defaults(fn=cmd_import)
+    s.add_argument("-o", "--output", help="design file to write (default: designs/<VSusp project name>.yaml)")
+    s.set_defaults(fn=cmd_import)
 
     s = sub.add_parser("link", help="print the VSusp link for a design file")
     s.add_argument("design"); s.set_defaults(fn=cmd_link)
@@ -134,6 +159,10 @@ def main(argv=None):
     s.add_argument("design"); s.add_argument("-o", "--output", help="folder for plots and report")
     s.add_argument("--compare", help="second design file to overlay on the plots")
     s.add_argument("--label"); s.add_argument("--compare-label"); s.set_defaults(fn=cmd_analyze)
+
+    s = sub.add_parser("compare", help="front-view metrics of 2-4 designs side by side, with an overlay plot")
+    s.add_argument("designs", nargs="+"); s.add_argument("-o", "--output", help="folder for the plot, CSV and Markdown table")
+    s.set_defaults(fn=cmd_compare)
 
     s = sub.add_parser("optimize", aliases=["optimise"], help="optimise chassis pivot positions")
     s.add_argument("design"); s.add_argument("-o", "--output", required=True, help="new design file to write")

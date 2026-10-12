@@ -31,14 +31,15 @@ def _axes(ax, aspect=False):
 
 
 def front_view(designs, out_path, title="Front-view kinematics", roll_max=2.5, travel=30.0, heave=20.0):
-    """designs: list of (label, {"front": FV, "rear": FV}); first is drawn solid, second dashed."""
+    """designs: list of up to four (label, {"front": FV, "rear": FV}); solid, dashed, dotted, dash-dot."""
     _style()
     fig, axs = plt.subplots(2, 2, figsize=(11.5, 8.4))
     for ax in axs.flat:
         _axes(ax)
-    styles = [dict(lw=2.2, ls="-", alpha=1.0), dict(lw=1.5, ls=(0, (4, 3)), alpha=0.6)]
+    styles = [dict(lw=2.2, ls="-", alpha=1.0), dict(lw=1.5, ls=(0, (4, 3)), alpha=0.6),
+              dict(lw=1.6, ls=(0, (1, 1.5)), alpha=0.8), dict(lw=1.5, ls=(0, (6, 2, 1, 2)), alpha=0.7)]
     z = np.linspace(-travel, travel, 41); ph = np.linspace(0, roll_max, 21); hv = np.linspace(-heave, heave, 33)
-    for i, (label, d) in enumerate(designs[:2]):
+    for i, (label, d) in enumerate(designs[:len(styles)]):
         st = styles[i]
         for axle in ("front", "rear"):
             P = d[axle]; col = AXLE_COL[axle]; lab = f"{axle.capitalize()} {label}".strip()

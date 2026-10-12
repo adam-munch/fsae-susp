@@ -29,3 +29,11 @@ def test_cli_import(original_link, tmp_path):
     assert main(["import-vsusp", str(f), "-o", str(out)]) == 0
     cfg = config.load(out)
     assert cfg["front"]["lower_arm"] == pytest.approx(351.5)
+
+
+def test_cli_compare(example_design, tmp_path, capsys):
+    out = tmp_path / "cmp"
+    assert main(["compare", str(example_design), str(example_design), "-o", str(out)]) == 0
+    assert "Change" in capsys.readouterr().out
+    assert all((out / f).exists() for f in ("front_view.png", "comparison.csv", "comparison.md"))
+    assert main(["compare", str(example_design)]) == 2

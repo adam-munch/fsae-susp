@@ -16,6 +16,9 @@ test = ["pytest>=7"]
 [project.scripts]
 fsae-susp = "fsaesusp.cli:main"
 
+[project.gui-scripts]
+fsae-susp-gui = "fsaesusp.gui:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

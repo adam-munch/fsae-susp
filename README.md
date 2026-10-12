@@ -44,34 +44,62 @@ pip install -e ".[test]"
 ```bash
 # 1. Turn a VSusp link into a design file.
 #    The link can be in quotes, or in a text file (easier on Windows, where % can trip up cmd).
-fsae-susp import-vsusp examples/original_vsusp_link.txt -o mycar.yaml
+#    It is saved as designs/<project name>.yaml; -o picks another name.
+fsae-susp import-vsusp examples/original_vsusp_link.txt -o designs/mycar.yaml
 
-# 2. Front-view analysis: table on screen, plots and report in results/
-fsae-susp analyze mycar.yaml -o results
+# 2. Front-view analysis: table on screen, plots and report in results/mycar/
+fsae-susp analyze designs/mycar.yaml -o results/mycar
 
 # 3. Optimise pickups. Set bounds and targets under `optimise:` in the design file first.
 #    --quick takes about 1 min per axle; drop it for the full search (about 3-4 min per axle).
-fsae-susp optimize mycar.yaml -o mycar_opt.yaml --quick --plot
+fsae-susp optimize designs/mycar.yaml -o designs/mycar_opt.yaml --quick --plot
 
 # 4. 3D check (edit the `three_d:` blocks first: caster, anti %, pivot spacing, tie rod)
-fsae-susp check3d mycar_opt.yaml -o results3d
+fsae-susp check3d designs/mycar_opt.yaml -o results3d/mycar_opt
 
 # 5. Everything in one go, plus a Markdown report
-fsae-susp report mycar_opt.yaml -o report
+fsae-susp report designs/mycar_opt.yaml -o report/mycar_opt
 
 # Get the VSusp link back to view the design in the browser
-fsae-susp link mycar_opt.yaml
+fsae-susp link designs/mycar_opt.yaml
 ```
 
 `examples/fsae_aero_v2.yaml` is a complete design (the 3D-checked aero redesign) with every field commented.
+
+## GUI
+
+`fsae-susp-gui` (or `python -m fsaesusp.gui`) opens a small window. Pick a design file or paste a VSusp
+link, then click Analyze, Optimise, 3D check, Full report or VSusp link. The GUI runs the same commands as the
+command line. Their output appears in the Output tab, and the PNGs they write appear in the Plots tab.
+The Plots tab shows all of a design's plots together: the front-view plot from Analyze, and the 3D plots
+from 3D check, each from the latest run. Click a plot, or switch to One, to see it on its own.
+
+The Projects list on the left shows every design in `designs/`, newest first, with its VSusp project name and
+which results exist. Double-click a design to open it and see its latest plots. To compare designs, Ctrl+click
+2 to 4 of them and click Compare. The Compare tab then shows their front-view metrics side by side, with rows
+that differ shaded and the change from the older design to the newer one. The Plots tab shows them overlaid.
+Comparisons are saved in `results/compare/<a>_vs_<b>/`. Right-click a design to analyse, check or report on
+it directly, or to show it in its folder.
+
+Shortcuts: Ctrl+O picks a design file, F5 reloads the designs and plots, Esc stops the running command, and
+the Left and Right arrow keys step through the plots in the Plots tab. Hover over a button to see what it does.
+
+Imported links are saved as `designs/<name>.yaml`, as on the command line. The name defaults to the VSusp
+project name, and you can change it before saving.
+
+The GUI chooses the output folders, using the design file's name for the subfolder. For `sastha.yaml`, Analyze
+writes to `results/sastha/`, 3D check to `results3d/sastha/` and Full report to `report/sastha/`. These folders
+are in the project root. Optimise saves the new design next to the original (`sastha_opt.yaml` by default) and
+its plots in `sastha_opt_plots/`.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `import-vsusp LINK -o design.yaml` | New design file from a VSusp link (or a text file holding it). 3D and vehicle values start at defaults. |
+| `import-vsusp LINK [-o design.yaml]` | New design file from a VSusp link (or a text file holding it). Without `-o` it is saved as `designs/<VSusp project name>.yaml`. 3D and vehicle values start at defaults. |
 | `link design.yaml` | Print the VSusp link for the design. |
 | `analyze design.yaml [-o DIR] [--compare other.yaml]` | Front-view table and flags. With `-o`: `front_view.png` and `report_front_view.md`. `--compare` overlays a second design. |
+| `compare a.yaml b.yaml [c.yaml d.yaml] [-o DIR]` | Front-view metrics of 2 to 4 designs side by side, with the change from the first to the second when there are two. With `-o`: an overlay `front_view.png`, `comparison.csv` and `comparison.md`. |
 | `optimize design.yaml -o new.yaml [--axle front/rear/both] [--quick] [--workers N] [--plot]` | Optimise inner pivots and write a new design file. `--workers -1` uses all cores. |
 | `check3d design.yaml [-o DIR] [--no-steering] [--sync]` | 3D tables and flags. With `-o`: `hardpoints_3d.csv`, `check3d.png`, `layout_3d.png`, `report_3d.md`. `--sync` writes the 3D tie-rod points back into the design file. |
 | `report design.yaml -o DIR` | Front view and 3D check, all plots, CSV and `report.md`. |
