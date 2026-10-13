@@ -32,6 +32,10 @@ DEFAULT_TARGETS = dict(
 
 DEFAULT_CAMBER = dict(outside_target=-1.5, low_speed=[1.5, 0.0], high_speed=[1.8, 10.0])
 
+# What `optimise.<axle>.lock` can hold at the design's current value: the four pivot coordinates
+# (VSusp coordinates, as in the bounds) and the static camber.
+LOCKABLE = ("lower_x", "lower_y", "upper_x", "upper_y", "camber")
+
 
 def _knuckle(P):
     return {k: P[k] for k in ("hux", "huy", "hlx", "hly", "otr_x", "otr_y")}
@@ -71,15 +75,18 @@ def _cost(x, ctx, detail=False):
 
 def optimise_axle(P0: dict, bounds: dict, targets: dict | None = None, camber: dict | None = None,
                   roll_op: float = 1.5, heave_op: float = 10.0, seed: int = 0, quick: bool = False,
-                  workers: int = 1, progress=print) -> dict:
+                  workers: int = 1, static_camber: float | None = None, progress=print) -> dict:
     """Optimise the inner pivots of one axle.
 
     ``bounds``: {"lower_x": [lo, hi], "lower_y": [lo, hi], "upper_x": [...], "upper_y": [...]}
     with x from the frame centre and y **above the frame bottom** (VSusp convention).
-    A range with lo == hi fixes that coordinate. Returns a dict with the new
-    front-view parameters, metrics before/after and the cost breakdown.
+    A range with lo == hi fixes that coordinate. ``static_camber`` (deg) keeps that
+    static camber instead of choosing one for the outside-wheel target. Returns a dict
+    with the new front-view parameters, metrics before/after and the cost breakdown.
     """
     T = dict(DEFAULT_TARGETS); T.update(targets or {})
+    if static_camber is not None:
+        T["optimise_camber"] = float(static_camber)
     C = dict(DEFAULT_CAMBER); C.update(camber or {})
     ride = float(P0["bottom_y"])
     s0 = axle_state(Corner2D(P0))
@@ -122,12 +129,16 @@ def optimise_axle(P0: dict, bounds: dict, targets: dict | None = None, camber: d
     xbest = np.clip(np.round(xbest * 2) / 2, [b[0] for b in bnds], [b[1] for b in bnds])
     xA, yA, xB, yB = xbest
     J, terms, m_opt, _ = _cost(xbest, ctx, detail=True)
-    cam = pick_static_camber(ctx["knuckle"], (xA, yA), (xB, yB), ctx["half_track"], ride, ctx["tire_d"],
-                             ctx["compression"], ctx["offset"], C["outside_target"], tuple(C["low_speed"]),
-                             tuple(C["high_speed"]))
+    if static_camber is not None:
+        cam = float(static_camber)
+    else:
+        cam = pick_static_camber(ctx["knuckle"], (xA, yA), (xB, yB), ctx["half_track"], ride, ctx["tire_d"],
+                                 ctx["compression"], ctx["offset"], C["outside_target"], tuple(C["low_speed"]),
+                                 tuple(C["high_speed"]))
     P = build_from_pose(ctx["knuckle"], (xA, yA), (xB, yB), ctx["half_track"], cam, ride, ctx["tire_d"],
                         ctx["compression"], ctx["offset"], P0.get("tire_w", 200.0), P0.get("wheel_d", 254.0))
-    P["upper_len"] = round(P["upper_len"], 1); P["lower_len"] = round(P["lower_len"], 1)
+    nd = 1 if static_camber is None else 2          # 0.01 mm (VSusp's step) keeps a locked camber to ~0.005 deg
+    P["upper_len"] = round(P["upper_len"], nd); P["lower_len"] = round(P["lower_len"], nd)
     progress(f"  optimised in {time.time() - t0:.0f} s, cost {J:.2f}")
     return dict(params=P, cost=J, terms=terms, static_camber=cam,
                 before=metrics(P0, roll_op, heave_op), after=metrics(P, roll_op, heave_op),

@@ -9,7 +9,7 @@ import numpy as np
 
 from . import config as cfgmod
 from .analysis2d import static_summary, metrics
-from .optimize import optimise_axle
+from .optimize import optimise_axle, LOCKABLE
 from .layout3d import build_corner
 from .geometry3d import anti_values
 from .clearance import ClearanceModel
@@ -36,21 +36,51 @@ def analyze(cfg: dict) -> dict:
 
 
 def optimize(cfg: dict, axles=AXLES, quick=False, seed=0, workers=1, progress=print) -> tuple:
-    """Returns (new design dict, per-axle optimiser results)."""
+    """Returns (new design dict, per-axle optimiser results).
+
+    Names in ``optimise.<axle>.lock`` keep the design's current value (see ``optimize.LOCKABLE``).
+    """
     new = copy.deepcopy(cfg); results = {}
     cam = cfg["optimise"]["camber"]
     for axle in axles:
-        P0 = cfgmod.axle_fv(cfg, axle)
-        o = cfg["optimise"].get(axle, {}) or {}
-        bounds = _default_bounds(P0); bounds.update(o.get("bounds", {}) or {})
+        st = optimise_setup(cfg, axle)
+        P0, vals, locked = st["P0"], st["values"], st["locked"]
+        o = cfg["optimise"].get(axle) or {}
+        bounds = dict(st["bounds"]); bounds.update({k: [vals[k]] * 2 for k in locked if k in bounds})
         targets = {"rc_height": axle_state(Corner2D(P0))["rc"][1]}
         targets.update(o.get("targets", {}) or {})
-        progress(f"Optimising {axle} pivots (bounds {bounds}) ...")
+        shown = {k: [round(v, 2) for v in b] for k, b in bounds.items() if k not in locked}
+        held = ", ".join(f"{k} {vals[k]:.2f}" for k in locked)
+        progress(f"Optimising {axle} pivots ("
+                 + "; ".join(([f"bounds {shown}"] if shown else []) + ([f"locked {held}"] if held else [])) + ") ...")
         r = optimise_axle(P0, bounds, targets, cam, roll_op=cam["low_speed"][0], heave_op=cam["high_speed"][1],
-                          seed=seed, quick=quick, workers=workers, progress=progress)
+                          seed=seed, quick=quick, workers=workers,
+                          static_camber=vals["camber"] if "camber" in locked else None, progress=progress)
+        r["locked"] = locked
         cfgmod.set_axle_fv(new, axle, r["params"])
         results[axle] = r
     return new, results
+
+
+def lock_list(cfg: dict, axle: str) -> list:
+    """``optimise.<axle>.lock``, checked, in ``LOCKABLE`` order."""
+    lock = (cfg["optimise"].get(axle) or {}).get("lock") or []
+    lock = [lock] if isinstance(lock, str) else list(lock)
+    bad = [str(k) for k in lock if k not in LOCKABLE]
+    if bad:
+        raise ValueError(f"optimise.{axle}.lock: unknown {', '.join(bad)} (use {', '.join(LOCKABLE)})")
+    return [k for k in LOCKABLE if k in lock]
+
+
+def optimise_setup(cfg: dict, axle: str) -> dict:
+    """What the optimiser starts from on one axle: the front-view dict ``P0``, the current ``values`` of the
+    lockable parameters (pivots in VSusp coordinates, static camber in deg), the ``locked`` names and the
+    search ``bounds`` from the design file (or the defaults) before the locks are applied."""
+    P0 = cfgmod.axle_fv(cfg, axle)
+    values = dict(lower_x=P0["cx_l"], lower_y=P0["by_l"], upper_x=P0["cx_u"], upper_y=P0["by_u"],
+                  camber=float(axle_state(Corner2D(P0))["cam_r"]))
+    bounds = _default_bounds(P0); bounds.update((cfg["optimise"].get(axle) or {}).get("bounds") or {})
+    return dict(P0=P0, values=values, locked=lock_list(cfg, axle), bounds=bounds)
 
 
 def _default_bounds(P):

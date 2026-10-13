@@ -24,7 +24,7 @@ DEFAULTS = {
                          "lower_pivot_x": [150.0, -150.0], "upper_pivot_x": [120.0, -120.0],
                          "tie_rod": {"x": -70.0, "inner": "auto"}}},
     "optimise": {"camber": {"outside_target": -1.5, "low_speed": [1.5, 0.0], "high_speed": [1.8, 10.0]},
-                 "front": {"targets": {}, "bounds": {}}, "rear": {"targets": {}, "bounds": {}}},
+                 "front": {"targets": {}, "bounds": {}, "lock": []}, "rear": {"targets": {}, "bounds": {}, "lock": []}},
 }
 
 AXLES = ("front", "rear")

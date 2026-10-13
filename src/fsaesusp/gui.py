@@ -22,6 +22,9 @@ import yaml
 from . import vsusp
 from .paths import design_name, designs_dir, project_root
 
+LOCK_LABELS = dict(lower_x="Lower pivot x", lower_y="Lower pivot y", upper_x="Upper pivot x", upper_y="Upper pivot y",
+                   camber="Static camber")
+
 try:
     from PIL import Image, ImageTk          # installed with matplotlib
 except ImportError:                         # pragma: no cover
@@ -143,6 +146,7 @@ class App(tk.Tk):
         self._after_run = None
         self._resize_job = None
         self._t0, self._cmd, self._stopping = 0.0, "", False
+        self._locks = {}            # (design, axle) -> (the file's locks, what was ticked) from the Optimise dialog
 
         self.design = tk.StringVar()
         self.outdir = tk.StringVar()
@@ -218,7 +222,8 @@ class App(tk.Tk):
         c = ttk.Checkbutton(run, text="Skip steering sweep", variable=self.no_steering); c.pack(side="left")
         Tooltip(c, "Leave out the slower steering sweep in the 3D check")
         sep()
-        button("Optimise...", self._optimize, "Optimise the inner pivots and save the result as a new design")
+        button("Optimise...", self._optimize, "Pick what to lock, then optimise the inner pivots\nand save the "
+               "result as a new design")
         ttk.Label(run, text="Axle").pack(side="left", padx=(0, gap // 2))
         ttk.Combobox(run, textvariable=self.axle, values=["both", "front", "rear"], width=6,
                      state="readonly").pack(side="left", padx=(0, gap * 2))
@@ -538,17 +543,84 @@ class App(tk.Tk):
         d = self._need_design()
         if not d:
             return
-        p = Path(d)
-        out = filedialog.asksaveasfilename(title="Save optimised design as", defaultextension=".yaml", parent=self,
-                                           initialdir=p.parent, initialfile=p.stem + "_opt.yaml",
-                                           filetypes=[("YAML", "*.yaml")])
-        if not out:
+        self.configure(cursor="watch"); self.update_idletasks()
+        try:
+            from . import api, config as cfgmod        # numpy and scipy: loaded the first time only
+            from .optimize import LOCKABLE
+            cfg = cfgmod.load(d)
+            axles = api.AXLES if self.axle.get() == "both" else (self.axle.get(),)
+            setup = {ax: api.optimise_setup(cfg, ax) for ax in axles}
+        except Exception as e:
+            messagebox.showerror("fsae-susp", f"Could not set up the optimiser for {Path(d).name}:\n{e}", parent=self)
             return
-        args = ["optimize", d, "-o", out, "--axle", self.axle.get(), "--workers", "-1", "--plot"]
-        if self.quick.get():
-            args.append("--quick")
-        self._after_run = lambda: (self.design.set(out), self.outdir.set(str(Path(out).with_suffix("")) + "_plots"))
-        self._run(args)
+        finally:
+            self.configure(cursor="")
+        target = cfg["optimise"]["camber"]["outside_target"]
+        px, gap = self._px(10), self._px(6)
+        win = tk.Toplevel(self); win.title(f"Optimise {Path(d).stem}"); win.transient(self); win.withdraw()
+        f = ttk.Frame(win, padding=px); f.pack(fill="both", expand=True)
+        ncol = 1 + 2 * len(axles)
+        ticks = {}
+        for j, ax in enumerate(axles):
+            st = setup[ax]; c = 1 + 2 * j
+            ttk.Label(f, text=ax.capitalize(), font=self.bold).grid(row=1, column=c, columnspan=2, sticky="w",
+                                                                     padx=(px * 2, 0))
+            # what was ticked here last time, unless the design file's locks have changed since
+            file_locks, chosen = self._locks.get((d, ax), (st["locked"], set(st["locked"])))
+            if file_locks != st["locked"]:
+                chosen = set(st["locked"])
+            for i, k in enumerate(LOCKABLE, start=2):
+                v = st["values"][k]; fixed = False
+                if k == "camber":
+                    text, note = f"{v:.2f} deg", f"else chosen for {target:g} deg outside"
+                else:
+                    lo, hi = map(float, st["bounds"][k]); fixed = lo == hi and k not in st["locked"]
+                    text, note = f"{v:.1f} mm", f"fixed at {lo:g} by bounds" if lo == hi else f"{lo:g} to {hi:g}"
+                var = tk.BooleanVar(value=k in chosen); ticks[ax, k] = var
+                cb = ttk.Checkbutton(f, text=text, variable=var, state="disabled" if fixed else "normal")
+                cb.grid(row=i, column=c, sticky="w", padx=(px * 2, gap), pady=1)
+                ttk.Label(f, text=note, style="Muted.TLabel").grid(row=i, column=c + 1, sticky="w")
+                Tooltip(cb, f"Lock the {ax} {LOCK_LABELS[k].lower()} at {text}")
+        for i, k in enumerate(LOCKABLE, start=2):
+            ttk.Label(f, text=LOCK_LABELS[k]).grid(row=i, column=0, sticky="w")
+        f.update_idletasks()                # wrap the text above and below to the table's width
+        wrap = max(f.grid_bbox(0, 1, ncol - 1, len(LOCKABLE) + 1)[2], self._px(380))
+        ttk.Label(f, wraplength=wrap, text="Tick what keeps its current value. Everything else is searched "
+                  "within its range.").grid(row=0, column=0, columnspan=ncol, sticky="w", pady=(0, gap))
+        ttk.Label(f, style="Muted.TLabel", wraplength=wrap, text="Locks in the design file (optimise: <axle>: lock:) "
+                  "start ticked. The new design keeps the locks used, so it opens with them ticked.").grid(
+            row=len(LOCKABLE) + 2, column=0, columnspan=ncol, sticky="w", pady=(gap, 0))
+        btns = ttk.Frame(f); btns.grid(row=len(LOCKABLE) + 3, column=0, columnspan=ncol, sticky="e", pady=(px, 0))
+
+        def go():
+            lock, unlock = [], []           # passed as changes to the design file's locks
+            for ax in axles:
+                st = setup[ax]
+                chosen = {k for k in LOCKABLE if ticks[ax, k].get()}
+                self._locks[d, ax] = (st["locked"], chosen)
+                lock += [f"{ax}.{k}" for k in LOCKABLE if k in chosen and k not in st["locked"]]
+                unlock += [f"{ax}.{k}" for k in LOCKABLE if k not in chosen and k in st["locked"]]
+            win.destroy()
+            p = Path(d)
+            out = filedialog.asksaveasfilename(title="Save optimised design as", defaultextension=".yaml", parent=self,
+                                               initialdir=p.parent, initialfile=p.stem + "_opt.yaml",
+                                               filetypes=[("YAML", "*.yaml")])
+            if not out:
+                return
+            args = ["optimize", d, "-o", out, "--axle", self.axle.get(), "--workers", "-1", "--plot"]
+            if self.quick.get():
+                args.append("--quick")
+            args += (["--lock", ",".join(lock)] if lock else []) + (["--unlock", ",".join(unlock)] if unlock else [])
+            self._after_run = lambda: (self.design.set(out), self.outdir.set(str(Path(out).with_suffix("")) + "_plots"))
+            self._run(args)
+
+        ttk.Button(btns, text="Cancel", command=win.destroy).pack(side="right")
+        ok = ttk.Button(btns, text="Optimise...", command=go, default="active"); ok.pack(side="right", padx=gap)
+        if self.proc:
+            ok.configure(state="disabled")
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.bind("<Return>", lambda e: ok.invoke())
+        self._center(win); win.deiconify(); win.grab_set(); ok.focus_set()
 
     def _check3d(self):
         d = self._need_design()

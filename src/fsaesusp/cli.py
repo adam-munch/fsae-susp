@@ -9,6 +9,7 @@ from pathlib import Path
 from . import __version__
 from . import config as cfgmod
 from . import api, plots, report
+from .optimize import LOCKABLE
 from .paths import default_design_path
 
 
@@ -73,9 +74,30 @@ def cmd_compare(a):
         print(f"\nWrote {out / 'front_view.png'}, comparison.csv and comparison.md")
 
 
+def _lock_specs(specs, axles):
+    """``--lock``/``--unlock`` values: comma-separated ``[axle.]name`` -> {axle: names}.
+    A name without an axle applies to every axle being optimised."""
+    out = {ax: set() for ax in api.AXLES}
+    for item in (s.strip() for spec in specs or [] for s in spec.split(",")):
+        if not item:
+            continue
+        ax, _, name = item.rpartition(".")
+        if ax and ax not in api.AXLES:
+            raise ValueError(f"lock '{item}': the axle is front or rear")
+        if name not in LOCKABLE:
+            raise ValueError(f"lock '{item}': unknown parameter (use {', '.join(LOCKABLE)})")
+        for x in ((ax,) if ax else axles):
+            out[x].add(name)
+    return out
+
+
 def cmd_optimize(a):
     cfg = cfgmod.load(a.design)
     axles = api.AXLES if a.axle == "both" else (a.axle,)
+    lock, unlock = _lock_specs(a.lock, axles), _lock_specs(a.unlock, axles)
+    for axle in api.AXLES:              # the locks used are saved with the new design
+        keep = (set(api.lock_list(cfg, axle)) | lock[axle]) - unlock[axle]
+        cfg["optimise"][axle] = dict(cfg["optimise"].get(axle) or {}, lock=[k for k in LOCKABLE if k in keep])
     new, results = api.optimize(cfg, axles, quick=a.quick, seed=a.seed, workers=a.workers)
     for axle, r in results.items():
         b, f = r["before"], r["after"]
@@ -83,7 +105,8 @@ def cmd_optimize(a):
                                                                   "camber_gain", "roll_camber", "lca_incl", "uca_incl",
                                                                   "lower_len", "upper_len")]
         print(f"\n{axle}: new pivots (VSusp coords) lower ({r['pivots']['lower_x']:.1f}, {r['pivots']['lower_y']:.1f}), "
-              f"upper ({r['pivots']['upper_x']:.1f}, {r['pivots']['upper_y']:.1f}); static camber {r['static_camber']:.2f} deg")
+              f"upper ({r['pivots']['upper_x']:.1f}, {r['pivots']['upper_y']:.1f}); static camber {r['static_camber']:.2f} deg"
+              + (f"; locked {', '.join(r['locked'])}" if r["locked"] else ""))
         print(report.table(rows, [axle, "before", "after"]))
     cfgmod.save(new, a.output, header=f"fsae-susp design file - optimised from {Path(a.design).name}")
     print(f"\nWrote {a.output}\nVSusp link:\n{cfgmod.to_vsusp_link(new)}")
@@ -171,6 +194,10 @@ def main(argv=None):
     s.add_argument("--seed", type=int, default=0); s.add_argument("--workers", type=int, default=1,
                    help="parallel processes for the search (-1 = all cores)")
     s.add_argument("--plot", action="store_true", help="also plot optimised vs original")
+    s.add_argument("--lock", action="append", metavar="[AXLE.]NAME",
+                   help=f"keep at the design's current value, as well as optimise.<axle>.lock: {', '.join(LOCKABLE)}. "
+                        "Comma-separate or repeat. Without front. or rear. it applies to every axle optimised")
+    s.add_argument("--unlock", action="append", metavar="[AXLE.]NAME", help="free a parameter the design file locks")
     s.set_defaults(fn=cmd_optimize)
 
     s = sub.add_parser("check3d", help="3D check: caster, anti %%, bump/roll steer, Ackermann, lock, clearance")

@@ -84,6 +84,10 @@ it directly, or to show it in its folder.
 Shortcuts: Ctrl+O picks a design file, F5 reloads the designs and plots, Esc stops the running command, and
 the Left and Right arrow keys step through the plots in the Plots tab. Hover over a button to see what it does.
 
+Optimise... opens a dialog with each axle's pivot coordinates and static camber, their current values and
+search ranges. Tick the ones to lock. The design file's `lock:` lists start ticked. A coordinate that the
+bounds already fix is greyed out. Then pick where to save the new design.
+
 Imported links are saved as `designs/<name>.yaml`, as on the command line. The name defaults to the VSusp
 project name, and you can change it before saving.
 
@@ -100,7 +104,7 @@ its plots in `sastha_opt_plots/`.
 | `link design.yaml` | Print the VSusp link for the design. |
 | `analyze design.yaml [-o DIR] [--compare other.yaml]` | Front-view table and flags. With `-o`: `front_view.png` and `report_front_view.md`. `--compare` overlays a second design. |
 | `compare a.yaml b.yaml [c.yaml d.yaml] [-o DIR]` | Front-view metrics of 2 to 4 designs side by side, with the change from the first to the second when there are two. With `-o`: an overlay `front_view.png`, `comparison.csv` and `comparison.md`. |
-| `optimize design.yaml -o new.yaml [--axle front/rear/both] [--quick] [--workers N] [--plot]` | Optimise inner pivots and write a new design file. `--workers -1` uses all cores. |
+| `optimize design.yaml -o new.yaml [--axle front/rear/both] [--quick] [--workers N] [--plot] [--lock ...] [--unlock ...]` | Optimise inner pivots and write a new design file. `--workers -1` uses all cores. `--lock`/`--unlock` hold or free parameters (see below). |
 | `check3d design.yaml [-o DIR] [--no-steering] [--sync]` | 3D tables and flags. With `-o`: `hardpoints_3d.csv`, `check3d.png`, `layout_3d.png`, `report_3d.md`. `--sync` writes the 3D tie-rod points back into the design file. |
 | `report design.yaml -o DIR` | Front view and 3D check, all plots, CSV and `report.md`. |
 
@@ -148,6 +152,21 @@ YAML (or JSON). See `examples/fsae_aero_v2.yaml`. Units are mm and degrees.
   `src/fsaesusp/optimize.py`.
 * `front/rear.bounds`: `lower_x`, `lower_y`, `upper_x`, `upper_y` as `[lo, hi]` in VSusp coordinates.
   `lo == hi` fixes that coordinate. Without bounds, the search stays within ±30 mm of the current pivots.
+* `front/rear.lock`: parameters that keep the design's current value, for example `lock: [lower_y, camber]`.
+  You can lock `lower_x`, `lower_y`, `upper_x`, `upper_y` (the pivot coordinates) and `camber` (the static
+  camber, which is otherwise chosen for `outside_target`). A lock overrides that coordinate's bounds.
+  Arm lengths can't be locked: they follow from the pivots, track and camber.
+
+  On the command line, `--lock` adds locks and `--unlock` removes ones the file sets. Give names as
+  `[axle.]name`, comma-separated or repeated. A name without an axle applies to every axle being optimised:
+
+  ```bash
+  fsae-susp optimize designs/mycar.yaml -o designs/mycar_opt.yaml --lock lower_y,camber --lock rear.upper_x
+  ```
+
+  The new design file keeps the locks that were used, so optimising it again holds the same parameters.
+  When camber is locked, arm lengths are rounded to 0.01 mm instead of 0.1 mm, so camber stays within about
+  0.005°.
 
 ## How it works
 
@@ -158,8 +177,8 @@ YAML (or JSON). See `examples/fsae_aero_v2.yaml`. Units are mm and degrees.
   pivot coordinates. Arm lengths are derived so track and static camber hold. The cost is a sum of squared
   normalised misses: RC height, RC heave slope above a threshold, RC lateral migration, swing-arm band, RC
   at the heave case, half-track change and packaging (arm lengths, arm angles, frame depth). Afterwards,
-  static camber is chosen so the outside wheel averages `outside_target` over the two cases. Pivots are
-  rounded to 0.5 mm and arm lengths to 0.1 mm.
+  static camber is chosen so the outside wheel averages `outside_target` over the two cases, unless it is
+  locked. Free pivots are rounded to 0.5 mm and arm lengths to 0.1 mm.
 * **3D** (`geometry3d.py`, `layout3d.py`): the upright pose has 6 degrees of freedom. Least-squares solves
   four ball-joint-to-pivot distances, the tie-rod length and the contact-patch height. Anti percentages
   come from virtual displacements:
@@ -192,7 +211,7 @@ YAML (or JSON). See `examples/fsae_aero_v2.yaml`. Units are mm and degrees.
 * With zero caster and no pivot-axis tilt, the 3D solver reproduces the 2D camber and contact-patch path.
 * The example design's 3D results stay as checked: 20 % anti-dive, 25 % anti-squat, 51 % Ackermann, and
   zero bump steer.
-* The optimiser respects its bounds.
+* The optimiser respects its bounds and locks.
 
 ## Limitations
 
