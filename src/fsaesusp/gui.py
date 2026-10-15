@@ -23,7 +23,9 @@ from . import vsusp
 from .paths import design_name, designs_dir, project_root
 
 LOCK_LABELS = dict(lower_x="Lower pivot x", lower_y="Lower pivot y", upper_x="Upper pivot x", upper_y="Upper pivot y",
-                   camber="Static camber")
+                   upper_bj_x="Upper ball joint x", lower_bj_x="Lower ball joint x", camber="Static camber",
+                   tie_rod_in="Outer tie rod, inboard", tie_rod_down="Outer tie rod, below hub",
+                   tie_rod_x="Outer tie rod, fore/aft", rack_x="Rack line, fore/aft")
 
 try:
     from PIL import Image, ImageTk          # installed with matplotlib
@@ -31,8 +33,8 @@ except ImportError:                         # pragma: no cover
     Image = ImageTk = None
 
 # Output folders by command, as in the README: <project>/<folder>/<design name>/
-OUT_DIRS = {"analyze": "results", "check3d": "results3d", "report": "report"}
-OUT_LABELS = {"analyze": "analysis", "check3d": "3D", "report": "report"}
+OUT_DIRS = {"analyze": "results", "check3d": "results3d", "report": "report", "sensitivity": "sensitivity"}
+OUT_LABELS = {"analyze": "analysis", "check3d": "3D", "report": "report", "sensitivity": "tolerance"}
 
 MUTED, STRIPE, DIFF = "#6b6a66", "#f6f6f4", "#fdf0d5"
 LOG_COLOURS = {"cmd": "#1f5fbf", "ok": "#2e7d32", "warn": "#a35a00", "err": "#b42318", "dim": MUTED}
@@ -137,7 +139,7 @@ class App(tk.Tk):
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         w, h = min(int(1280 * s), int(sw * .92)), min(int(820 * s), int(sh * .85))
         self.geometry(f"{w}x{h}+{(sw - w) // 2}+{max(0, (sh - h) // 2 - int(20 * s))}")
-        self.minsize(int(980 * s), int(580 * s))
+        self.minsize(int(1060 * s), int(580 * s))
 
         self.proc = None
         self.lines = queue.Queue()
@@ -219,11 +221,17 @@ class App(tk.Tk):
         button("VSusp link", self._link, "Print the design's VSusp link")
         sep()
         button("3D check", self._check3d, "3D tables, flags and plots.\nWrites results3d/<design>/")
-        c = ttk.Checkbutton(run, text="Skip steering sweep", variable=self.no_steering); c.pack(side="left")
+        c = ttk.Checkbutton(run, text="Skip steering", variable=self.no_steering); c.pack(side="left")
         Tooltip(c, "Leave out the slower steering sweep in the 3D check")
         sep()
-        button("Optimise...", self._optimize, "Pick what to lock, then optimise the inner pivots\nand save the "
-               "result as a new design")
+        button("Springs...", self._springs, "Analyse the rod, rocker and damper (motion ratio, rates, ride frequency,\n"
+               "roll and load transfer), or design new ones from spring_design\nand save them as a new design")
+        button("Sensitivity...", self._sensitivity, "How far each hardpoint's build tolerance moves the kinematics.\n"
+               "Writes sensitivity/<design>/")
+        sep()
+        button("Optimise...", self._optimize, "Pick what to lock, then optimise the inner pivots (and the ball\n"
+               "joints, if the design file gives them bounds), place the front steering for any\n"
+               "Ackermann or steering-ratio target, and save the result as a new design")
         ttk.Label(run, text="Axle").pack(side="left", padx=(0, gap // 2))
         ttk.Combobox(run, textvariable=self.axle, values=["both", "front", "rear"], width=6,
                      state="readonly").pack(side="left", padx=(0, gap * 2))
@@ -403,7 +411,8 @@ class App(tk.Tk):
         m = tk.Menu(self, tearoff=False)
         m.add_command(label="Open", command=self._open_project, font=self.bold)
         m.add_separator()
-        for label, fn in (("Analyze", self._analyze), ("3D check", self._check3d), ("Full report", self._report)):
+        for label, fn in (("Analyze", self._analyze), ("3D check", self._check3d), ("Springs...", self._springs),
+                          ("Sensitivity...", self._sensitivity), ("Full report", self._report)):
             m.add_command(label=label, state=busy, command=lambda fn=fn: (self._open_project(), fn()))
         m.add_command(label=f"Compare {len(sel)} designs", command=self._compare,
                       state=busy if 2 <= len(sel) <= 4 else "disabled")
@@ -546,7 +555,8 @@ class App(tk.Tk):
         self.configure(cursor="watch"); self.update_idletasks()
         try:
             from . import api, config as cfgmod        # numpy and scipy: loaded the first time only
-            from .optimize import LOCKABLE
+            from .optimize import LOCKABLE, BALL_JOINTS
+            from .steeropt import STEERING_VARS, wants_steering
             cfg = cfgmod.load(d)
             axles = api.AXLES if self.axle.get() == "both" else (self.axle.get(),)
             setup = {ax: api.optimise_setup(cfg, ax) for ax in axles}
@@ -570,9 +580,26 @@ class App(tk.Tk):
             if file_locks != st["locked"]:
                 chosen = set(st["locked"])
             for i, k in enumerate(LOCKABLE, start=2):
+                if k in STEERING_VARS and ax != "front":
+                    ticks[ax, k] = tk.BooleanVar(value=False)
+                    ttk.Label(f, text="front only", style="Muted.TLabel").grid(row=i, column=c, sticky="w",
+                                                                              padx=(px * 2, gap))
+                    continue
                 v = st["values"][k]; fixed = False
                 if k == "camber":
                     text, note = f"{v:.2f} deg", f"else chosen for {target:g} deg outside"
+                elif k in BALL_JOINTS:          # mm inboard of the hub face; fixed unless the design file gives bounds
+                    lo, hi = map(float, st["bounds"][k]); fixed = lo == hi and k not in st["locked"]
+                    text = f"{v:.2f} mm"
+                    note = ("fixed (give it bounds to free it)" if lo == hi == v else f"fixed at {lo:g} by bounds"
+                            if lo == hi else f"{lo:g} to {hi:g}")
+                elif k in STEERING_VARS:        # mm; tie_rod_x and rack_x ahead of the axle (behind = negative)
+                    lo, hi = map(float, st["bounds"][k]); fixed = lo == hi and k not in st["locked"]
+                    text = f"{v:.1f} mm"
+                    note = (("fixed (give it bounds to free it)" if lo == hi == v else f"fixed at {lo:g} by bounds")
+                            if lo == hi else f"{lo:g} to {hi:g}")
+                    if not wants_steering(st["targets"]):
+                        note += " (with a steering target)"
                 else:
                     lo, hi = map(float, st["bounds"][k]); fixed = lo == hi and k not in st["locked"]
                     text, note = f"{v:.1f} mm", f"fixed at {lo:g} by bounds" if lo == hi else f"{lo:g} to {hi:g}"
@@ -587,10 +614,27 @@ class App(tk.Tk):
         wrap = max(f.grid_bbox(0, 1, ncol - 1, len(LOCKABLE) + 1)[2], self._px(380))
         ttk.Label(f, wraplength=wrap, text="Tick what keeps its current value. Everything else is searched "
                   "within its range.").grid(row=0, column=0, columnspan=ncol, sticky="w", pady=(0, gap))
+        kpis = [f"{ax} {float(setup[ax]['targets']['kpi']):g} deg" for ax in axles
+                if setup[ax]["targets"].get("kpi") is not None]
+        ft = setup["front"]["targets"] if "front" in setup else {}
+        steer_t = [f"{lab} {ft[k]:g}{unit}" for k, lab, unit in (("ackermann", "Ackermann", "%"),
+                   ("rack_per_deg", "rack", " mm/deg"), ("steering_ratio", "steering ratio", ":1"))
+                   if ft.get(k) is not None]
         ttk.Label(f, style="Muted.TLabel", wraplength=wrap, text="Locks in the design file (optimise: <axle>: lock:) "
-                  "start ticked. The new design keeps the locks used, so it opens with them ticked.").grid(
+                  "start ticked. The new design keeps the locks used, so it opens with them ticked."
+                  + (f" KPI target ({', '.join(kpis)}): the upper ball joint, or the lower one if the upper one is "
+                     "fixed, is placed to hold it exactly, and the static camber is searched with the pivots."
+                     if kpis else "")
+                  + (f" Steering targets (front: {', '.join(steer_t)}): after the pivots, the outer tie rod and "
+                     "rack line are placed to hit them, keeping the tie rod's rim clearance."
+                     if steer_t else "")).grid(
             row=len(LOCKABLE) + 2, column=0, columnspan=ncol, sticky="w", pady=(gap, 0))
-        btns = ttk.Frame(f); btns.grid(row=len(LOCKABLE) + 3, column=0, columnspan=ncol, sticky="e", pady=(px, 0))
+        steer_only = tk.BooleanVar(value=False)
+        if steer_t:
+            so = ttk.Checkbutton(f, text="Steering only (keep the pivots, ball joints and camber)", variable=steer_only)
+            so.grid(row=len(LOCKABLE) + 3, column=0, columnspan=ncol, sticky="w", pady=(gap, 0))
+            Tooltip(so, "Only place the front outer tie rod and rack line for the steering targets")
+        btns = ttk.Frame(f); btns.grid(row=len(LOCKABLE) + 4, column=0, columnspan=ncol, sticky="e", pady=(px, 0))
 
         def go():
             lock, unlock = [], []           # passed as changes to the design file's locks
@@ -610,6 +654,8 @@ class App(tk.Tk):
             args = ["optimize", d, "-o", out, "--axle", self.axle.get(), "--workers", "-1", "--plot"]
             if self.quick.get():
                 args.append("--quick")
+            if steer_only.get():
+                args.append("--steering-only")
             args += (["--lock", ",".join(lock)] if lock else []) + (["--unlock", ",".join(unlock)] if unlock else [])
             self._after_run = lambda: (self.design.set(out), self.outdir.set(str(Path(out).with_suffix("")) + "_plots"))
             self._run(args)
@@ -631,6 +677,118 @@ class App(tk.Tk):
         d = self._need_design()
         if d:
             self._run(["report", d, "-o", self._out(d, "report")])
+
+    def _springs(self):
+        d = self._need_design()
+        if not d:
+            return
+        try:
+            data = yaml.safe_load(Path(d).read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            data = {}
+        has_springs = any((data.get(a) or {}).get("spring") for a in ("front", "rear"))
+        has_design = bool(data.get("spring_design"))
+        px, gap = self._px(10), self._px(6)
+        win = tk.Toplevel(self); win.title(f"Springs {Path(d).stem}"); win.transient(self); win.withdraw()
+        f = ttk.Frame(win, padding=px); f.pack(fill="both", expand=True)
+        mode = tk.StringVar(value="analyse" if has_springs or not has_design else "design")
+        r1 = ttk.Radiobutton(f, text="Analyse the design's springs", value="analyse", variable=mode,
+                             state="normal" if has_springs else "disabled")
+        r1.grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(f, text="Motion ratio, rates, ride frequency, roll and load transfer. Writes results3d/<design>/"
+                  if has_springs else "No front.spring or rear.spring block in this design yet.",
+                  style="Muted.TLabel").grid(row=1, column=0, columnspan=3, sticky="w", padx=(self._px(22), 0))
+        r2 = ttk.Radiobutton(f, text="Design new springs...", value="design", variable=mode,
+                             state="normal" if has_design else "disabled")
+        r2.grid(row=2, column=0, columnspan=3, sticky="w", pady=(gap, 0))
+        ttk.Label(f, text="Generate and optimise the rod, rocker and damper within spring_design's bounds, pick the "
+                  "spring rates\nand size the anti-roll bar, then save it as a new design." if has_design else
+                  "Add a spring_design block first (see examples/fsae_aero_v2.yaml).",
+                  style="Muted.TLabel").grid(row=3, column=0, columnspan=3, sticky="w", padx=(self._px(22), 0))
+        opts = ttk.Frame(f); opts.grid(row=4, column=0, columnspan=3, sticky="w", padx=(self._px(22), 0), pady=(gap, 0))
+        axle = tk.StringVar(value=self.axle.get()); quick = tk.BooleanVar(value=self.quick.get())
+        ttk.Label(opts, text="Axle").pack(side="left")
+        ax_box = ttk.Combobox(opts, textvariable=axle, values=["both", "front", "rear"], width=6, state="readonly")
+        ax_box.pack(side="left", padx=(gap // 2, gap * 2))
+        q = ttk.Checkbutton(opts, text="Quick (about 10 s per axle, else about 1 min)", variable=quick); q.pack(side="left")
+
+        def sync(*_):
+            st = "normal" if mode.get() == "design" else "disabled"
+            q.configure(state=st); ax_box.configure(state="readonly" if st == "normal" else "disabled")
+        mode.trace_add("write", sync); sync()
+        btns = ttk.Frame(f); btns.grid(row=5, column=0, columnspan=3, sticky="e", pady=(px, 0))
+
+        def go():
+            win.destroy()
+            if mode.get() == "analyse":
+                self._run(["springs", d, "-o", self._out(d, "check3d")]); return
+            p = Path(d)
+            out = filedialog.asksaveasfilename(title="Save the design with new springs as", defaultextension=".yaml",
+                                               parent=self, initialdir=p.parent, initialfile=p.stem + "_springs.yaml",
+                                               filetypes=[("YAML", "*.yaml")])
+            if not out:
+                return
+            args = ["design-springs", d, "-o", out, "--axle", axle.get(), "--workers", "-1", "--plot"]
+            if quick.get():
+                args.append("--quick")
+            self._after_run = lambda: (self.design.set(out), self.outdir.set(str(Path(out).with_suffix("")) + "_plots"))
+            self._run(args)
+
+        ttk.Button(btns, text="Cancel", command=win.destroy).pack(side="right")
+        ok = ttk.Button(btns, text="Run", command=go, default="active"); ok.pack(side="right", padx=gap)
+        if self.proc or not (has_springs or has_design):
+            ok.configure(state="disabled")
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.bind("<Return>", lambda e: ok.invoke())
+        self._center(win); win.deiconify(); win.grab_set(); ok.focus_set()
+
+    def _sensitivity(self):
+        d = self._need_design()
+        if not d:
+            return
+        try:
+            sc = (yaml.safe_load(Path(d).read_text(encoding="utf-8")) or {}).get("sensitivity") or {}
+        except (OSError, yaml.YAMLError):
+            sc = {}
+        px, gap = self._px(10), self._px(6)
+        win = tk.Toplevel(self); win.title(f"Sensitivity {Path(d).stem}"); win.transient(self); win.withdraw()
+        f = ttk.Frame(win, padding=px); f.pack(fill="both", expand=True)
+        tol = tk.StringVar(value=f"{float(sc.get('tol', 1.0)):g}")
+        tol_u = tk.StringVar(value=f"{float(sc.get('tol_upright', sc.get('tol', 1.0))):g}")
+        ttk.Label(f, text="Each hardpoint coordinate is moved by its tolerance, one at a time.").grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, gap))
+        for i, (lab, var, note) in enumerate((("Chassis points", tol, "arm pivots, inner tie rod / toe link"),
+                                              ("Upright points", tol_u, "ball joints, outer tie rod / toe link")), 1):
+            ttk.Label(f, text=lab).grid(row=i, column=0, sticky="w")
+            ttk.Spinbox(f, textvariable=var, from_=0.05, to=10, increment=0.25, width=7).grid(
+                row=i, column=1, sticky="w", padx=gap, pady=1)
+            ttk.Label(f, text=f"mm  ({note})", style="Muted.TLabel").grid(row=i, column=2, sticky="w")
+        axle = tk.StringVar(value=self.axle.get())
+        ttk.Label(f, text="Axle").grid(row=3, column=0, sticky="w", pady=(gap, 0))
+        ttk.Combobox(f, textvariable=axle, values=["both", "front", "rear"], width=6, state="readonly").grid(
+            row=3, column=1, sticky="w", padx=gap, pady=(gap, 0))
+        ttk.Label(f, text="About 20 s per axle.", style="Muted.TLabel").grid(row=4, column=0, columnspan=3,
+                                                                           sticky="w", pady=(gap, 0))
+        btns = ttk.Frame(f); btns.grid(row=5, column=0, columnspan=3, sticky="e", pady=(px, 0))
+
+        def go():
+            try:
+                t, tu = float(tol.get()), float(tol_u.get())
+                if t <= 0 or tu <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showwarning("fsae-susp", "Tolerances are numbers above 0 mm.", parent=win); return
+            win.destroy()
+            self._run(["sensitivity", d, "-o", self._out(d, "sensitivity"), "--tol", f"{t:g}",
+                       "--tol-upright", f"{tu:g}", "--axle", axle.get()])
+
+        ttk.Button(btns, text="Cancel", command=win.destroy).pack(side="right")
+        ok = ttk.Button(btns, text="Run", command=go, default="active"); ok.pack(side="right", padx=gap)
+        if self.proc:
+            ok.configure(state="disabled")
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.bind("<Return>", lambda e: ok.invoke())
+        self._center(win); win.deiconify(); win.grab_set(); ok.focus_set()
 
     def _out(self, design, cmd):
         p = out_dir(design, cmd)

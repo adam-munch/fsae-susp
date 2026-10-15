@@ -15,11 +15,19 @@ vehicle:
   cg_height: 280.0
   front_brake_bias: 0.65     # fraction of braking on the front axle (outboard brakes)
   inboard_drive: true        # diff on the chassis: anti-squat uses the wheel-centre force
+  # used by the spring analysis (ride frequency, roll gradient, load transfer, pitch):
+  mass: 280.0                # kg, car with driver
+  front_weight: 0.47         # fraction of the weight on the front axle
+  unsprung_mass: [12.0, 13.0]  # kg per corner, [front, rear] (or one number)
+  lateral_g: 1.5             # cornering case for the roll angle
+  braking_g: 1.5
+  accel_g: 1.0
 
 tyre:                         # Hoosier 16.0x7.5-10 (16.2 in measured OD, 8.4 in section on 8 in rim)
   diameter: 411.48
   width: 213.36
   static_deflection: 5.0     # loaded radius = diameter/2 - static_deflection
+  rate: 110.0                # N/mm vertical tyre rate (measure, or take it from tyre data)
 
 wheel:
   rim_diameter: 254.0
@@ -54,6 +62,21 @@ front:
     steering:
       lock_inside: 27.0            # inside-wheel lock to check (9 m hairpin needs ~27 deg)
       ackermann_at: 25.0           # inside angle at which Ackermann % is reported
+      # c_factor: 90.0             # mm of rack travel per steering-wheel turn: reports the steering ratio
+  spring:                          # pushrod, rocker and damper (from design-springs, see spring_design below).
+                                   # 3D points: x from THIS axle, y left, z up
+    rod: {arm: lower, at: 0.8336, above: 10.0}  # pickup 83% of the way from the pivot axis to the ball joint,
+                                                # 10 mm above it; or {arm: lower|upper|upright, point: [x, y, z]}
+    rocker:
+      pivot: [-13.4, 240.8, 308.8]
+      axis: [0.9785, 0.0661, 0.1956]   # the rocker turns about this direction
+      rod: [-24.4, 292.1, 346.6]       # rod-to-rocker point
+      damper: [-31.7, 277.3, 388.0]    # damper-to-rocker point
+    damper:
+      chassis: [-32.6, 114.9, 447.3]   # damper-to-chassis point
+      length: [144.0, 201.0]       # eye-to-eye fully compressed and fully extended (optional stroke check)
+    spring_rate: 52.54             # N/mm (300 lb/in), coaxial with the damper
+    arb: {wheel_rate: 19.2}        # N/mm at each wheel in roll; or {bar_rate: Nm/deg, lever: mm, motion_ratio: ..}
 
 rear:
   ride_height: 60.0
@@ -73,6 +96,17 @@ rear:
     tie_rod:
       x: -70.0                     # toe link 70 mm behind the axle
       inner: auto
+  spring:
+    rod: {arm: lower, at: 0.8187, above: 10.0}
+    rocker:
+      pivot: [-11.8, 215.3, 325.3]
+      axis: [0.975, -0.1698, -0.1431]
+      rod: [2.9, 266.6, 364.5]
+      damper: [2.2, 220.8, 414.0]
+    damper:
+      chassis: [-27.4, 50.2, 414.3]
+      length: [144.0, 201.0]
+    spring_rate: 70.05             # N/mm (400 lb/in)
 
 optimise:
   camber:                          # static camber is chosen so the outside wheel averages this
@@ -86,7 +120,12 @@ optimise:
       lower_y: [5, 60]
       upper_x: [240, 285]
       upper_y: [130, 240]
-    lock: []                       # keep at the current value: lower_x, lower_y, upper_x, upper_y, camber
+    lock: []                       # keep at the current value: lower_x, lower_y, upper_x, upper_y,
+                                   # upper_bj_x, lower_bj_x, camber
+    # Ball joints move only with bounds (mm inboard of the hub face). With them, a KPI target can be held:
+    #   targets: {kpi: 0.0}   bounds: {upper_bj_x: [40, 60], lower_bj_x: [40, 60]}
+    # Steering targets place the outer tie rod and rack line after the pivots (--steering-only: just that):
+    #   targets: {ackermann: 60, rack_per_deg: 0.89}   bounds: {tie_rod_in: [40, 60], rack_x: [-60, -30]}
   rear:
     targets: {rc_height: 45.0, fvsa_range: [900, 1300]}
     bounds:
@@ -94,4 +133,32 @@ optimise:
       lower_y: [5, 70]
       upper_x: [215, 275]
       upper_y: [130, 250]
+    lock: []
+
+spring_design:                     # design-springs: generate and optimise the spring blocks above
+  spring_step: 25.0                # lb/in steps the spring rate is rounded to (or spring_rates: [N/mm, ...])
+  arb: {axle: front, lltd_front: 0.50}   # size the anti-roll bar for this (or roll_gradient: deg/g)
+  front:
+    damper: [144.0, 201.0]         # eye to eye, fully compressed / fully extended
+    arm: lower                     # rod on the lower arm (pushrod) or upper arm (pullrod)
+    above: 10.0                    # pickup this far above the arm
+    damper_dir: [0.0, -1.0, 0.0]   # roughly the way the damper runs from the rocker to the chassis
+    targets: {mr: 0.92, ride_frequency: 3.85}   # also travel, travel_margin, min_angle, max_rotation, ...
+    bounds:                        # [lo, hi]; lo == hi fixes it. x from this axle.
+      pivot_x: [-20.0, 20.0]
+      pivot_y: [220.0, 280.0]
+      pivot_z: [280.0, 340.0]
+    damper_box: {y: [40.0, 300.0]} # where the damper's chassis end may go
+    lock: []                       # keep the spring block's value: at, pivot_x/y/z, rod_lever, damper_lever
+  rear:
+    damper: [144.0, 201.0]
+    arm: lower
+    above: 10.0
+    damper_dir: [0.0, -1.0, 0.0]
+    targets: {mr: 0.91, ride_frequency: 3.95}
+    bounds:
+      pivot_x: [-20.0, 20.0]
+      pivot_y: [200.0, 260.0]
+      pivot_z: [280.0, 340.0]
+    damper_box: {y: [40.0, 300.0]}
     lock: []

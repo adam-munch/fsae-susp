@@ -14,6 +14,9 @@ def test_optimiser_respects_bounds(example_design):
     assert r["pivots"]["upper_x"] == 255 and r["pivots"]["lower_y"] == pytest.approx(27.5)
     assert np.isfinite(r["cost"])
     assert r["after"]["rc"] == pytest.approx(45.0, abs=3.0)
+    # without ball-joint bounds or a KPI target the upright is untouched and the cost is as before
+    assert (r["params"]["hux"], r["params"]["hlx"]) == (P0["hux"], P0["hlx"])
+    assert r["kpi_joint"] is None and not {"scrub", "outside_camber"} & set(r["terms"])
 
 
 def test_cli_link_and_analyze(example_design, tmp_path, capsys):

@@ -1,0 +1,60 @@
+# fsae-susp design file. Geometry KPI 0 with the steering restored: outer tie rod moved on the upright (76 -> 70 mm inboard of the hub face, 60 -> 59.1 mm behind the axle) and the rack line moved 15 mm forward (inner_x_offset 14.1 -> rack at x = -45). Ackermann, steering ratio and lock back to the Geometry RC 355 KPI values; tie-rod clearance above them.
+name: Geometry KPI 0 steering
+vehicle: {wheelbase: 1550.0, cg_height: 280.0, front_brake_bias: 0.65, inboard_drive: true}
+tyre: {diameter: 406.4, width: 152.38, static_deflection: 0.0}
+wheel: {rim_diameter: 254.0, offset: 25.0, lip_inboard: 107.0, lip_radius: 122.0, link_radius: 8.0, node_inboard_of_lip: 35.0}
+front:
+  ride_height: 60.0
+  lower_pivot: [208.0, 36.0]
+  upper_pivot: [317.0, 170.0]
+  lower_arm: 334.77
+  upper_arm: 232.97
+  knuckle:
+    upper_ball_joint: [40.0, 88.0]
+    lower_ball_joint: [44.88, 83.0]
+    tie_rod: [70.0, 30.0]
+  three_d:
+    caster: 5.0
+    kingpin_offset_x: 0.0
+    anti: 20.0
+    lower_pivot_x: [150.0, -150.0]
+    upper_pivot_x: [120.0, -120.0]
+    tie_rod: {x: -59.1, inner: auto, inner_x_offset: 14.1}
+    steering: {lock_inside: 27.0, ackermann_at: 25.0}
+rear:
+  ride_height: 60.0
+  lower_pivot: [133.5, 29.5]
+  upper_pivot: [236.0, 166.0]
+  lower_arm: 380.3
+  upper_arm: 272.2
+  knuckle:
+    upper_ball_joint: [55.0, 90.0]
+    lower_ball_joint: [45.0, 95.0]
+    tie_rod: [30.0, 30.0]
+  three_d:
+    caster: 0.0
+    kingpin_offset_x: 0.0
+    anti: 25.0
+    lower_pivot_x: [150.0, -150.0]
+    upper_pivot_x: [120.0, -120.0]
+    tie_rod: {x: -70.0, inner: auto}
+optimise:
+  camber:
+    outside_target: -1.5
+    low_speed: [1.5, 0.0]
+    high_speed: [1.8, 10.0]
+  front:
+    targets: {rc_height: 37.3, kpi: 0.0, ackermann: 75.2, rack_per_deg: 1.101, tie_rod_clearance_min: 8.6}
+    bounds:
+      lower_x: [208.0, 208.0]
+      lower_y: [7.5, 67.5]
+      upper_x: [268.5, 328.5]
+      upper_y: [140.5, 200.5]
+      upper_bj_x: [40.0, 60.0]
+      lower_bj_x: [40.0, 60.0]
+      rack_x: [-60.0, -35.0]
+    lock: [lower_x]
+  rear:
+    targets: {}
+    bounds: {}
+    lock: []
